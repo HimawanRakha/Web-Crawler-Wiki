@@ -1,0 +1,38 @@
+# --- GLOBAL / OS ---
+.DS_Store
+Thumbs.db
+*.log
+
+# --- PYTHON (Backend) ---
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments (PENTING: Jangan upload venv)
+venv/
+.venv/
+env/
+ENV/
+
+# Environment Variables (PENTING: Jangan upload rahasia/password)
+.env
+.env.*
+
+# --- NODE JS / NEXT JS (Frontend) ---
+# Dependencies (PENTING: Jangan upload node_modules, ukurannya ratusan MB)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Next.js build output
+.next/
+out/
+build/
+dist/
+
+# IDE Settings (VS Code) - Opsional, boleh diupload boleh tidak
+.vscode/
+.idea/

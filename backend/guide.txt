@@ -1,0 +1,4 @@
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force 
+.\venv\Scripts\activate
+pip install requirements.txt
+python -m uvicorn main:app --reload
