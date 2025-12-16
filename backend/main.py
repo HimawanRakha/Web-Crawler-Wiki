@@ -5,6 +5,9 @@ from bs4 import BeautifulSoup
 import requests
 import asyncio 
 import re
+import time
+import heapq 
+from difflib import SequenceMatcher 
 
 app = FastAPI()
 
@@ -15,6 +18,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def calculate_heuristic(link_url, target_url):
+   
+    link_part = link_url.rstrip('/').split('/')[-1].replace('_', ' ').lower()
+    target_part = target_url.rstrip('/').split('/')[-1].replace('_', ' ').lower()
+    
+   
+    return SequenceMatcher(None, link_part, target_part).ratio()
 
 def get_page_data(url):
     try:
@@ -37,14 +49,9 @@ def get_page_data(url):
             if parsed.scheme in ['http', 'https'] and parsed.netloc == base_domain:
                  if not any(full_url.endswith(ext) for ext in ['.png', '.jpg', '.pdf', '.svg']):
                     clean_url = full_url.split('#')[0]
-
                     link_text = a_tag.text.strip()
-                    if re.match(r'^\d+$', link_text) or re.match(r'^\d{4}$', link_text):
-                        continue
-
-                    if "Istimewa:" in clean_url or "Bantuan:" in clean_url or "Kategori:" in clean_url:
-                        continue
-
+                    if re.match(r'^\d+$', link_text) or re.match(r'^\d{4}$', link_text): continue
+                    if "Istimewa:" in clean_url or "Bantuan:" in clean_url or "Kategori:" in clean_url: continue
                     links.append(clean_url)
         
         return {"title": title, "links": list(set(links))}
@@ -59,23 +66,71 @@ async def websocket_endpoint(websocket: WebSocket):
     start_url = data.get("start_url")
     target_url = data.get("target_url")
     max_nodes = data.get("max_nodes", 100)
+    algorithm = data.get("algorithm", "BFS")
 
-    queue = [(start_url, 0)] 
+    frontier = []
+    
+
+    if algorithm in ["UCS", "GREEDY"]:
+      
+        heapq.heappush(frontier, (0, start_url, 0)) 
+    else:
+       
+        frontier = [(start_url, 0)]
+
     visited = {start_url}
     parent_map = {start_url: None}
 
+   
+    ids_depth_limit = 0
+    if algorithm == "IDS":
+        
+        ids_depth_limit = 1 
+    
+    
     count = 0
     found = False
+    start_time = time.time()
 
     try:
-        while queue and count < max_nodes:
-            current_url, current_depth = queue.pop(0) 
+       
+        while (frontier or algorithm == "IDS") and count < max_nodes:
+            
+       
+            if not frontier and algorithm == "IDS":
+                ids_depth_limit += 1
+                if ids_depth_limit > 10:
+                    break
+                    
+                await websocket.send_json({"type": "status", "msg": f"IDS: Mengulang dengan kedalaman {ids_depth_limit}..."})
+                
+                frontier = [(start_url, 0)]
+               
+                visited = {start_url} 
+                
+                await asyncio.sleep(0.5)
+                continue
 
-            await websocket.send_json({"type": "status", "msg": f"Crawl: {current_url} (Layer {current_depth})"})
+           
+            if algorithm == "BFS":
+                current_url, current_depth = frontier.pop(0)
+            elif algorithm == "DFS" or algorithm == "IDS":
+                current_url, current_depth = frontier.pop() 
+            elif algorithm == "UCS":
+                cost, current_url, current_depth = heapq.heappop(frontier)
+            elif algorithm == "GREEDY":
+              
+                priority, current_url, current_depth = heapq.heappop(frontier)
+
+            msg_status = f"[{algorithm}] Crawl: {current_url}"
+            if algorithm == "IDS": msg_status += f" (Limit: {ids_depth_limit})"
+            
+            await websocket.send_json({"type": "status", "msg": msg_status})
 
             page_data = get_page_data(current_url)
 
             if page_data:
+            
                 await websocket.send_json({
                     "type": "node_added",
                     "node": {
@@ -87,10 +142,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 
                 count += 1
 
+              
                 if target_url in page_data['links']:
                     parent_map[target_url] = current_url
                     found = True
-
+                    
                     target_data = get_page_data(target_url)
                     await websocket.send_json({
                         "type": "node_added",
@@ -104,38 +160,73 @@ async def websocket_endpoint(websocket: WebSocket):
                         "type": "link_added",
                         "link": {"source": current_url, "target": target_url}
                     })
+                    break 
 
-                    await websocket.send_json({"type": "status", "msg": "TARGET DITEMUKAN!"})
-                    break
+                
+                if current_depth < 10: 
+                    
+               
+                    if algorithm == "IDS" and current_depth >= ids_depth_limit:
+                        continue
 
-                if current_depth < 6:
                     child_limit = 0
                     for link in page_data['links']:
-                        if link not in visited and child_limit < 4: 
+                       
+                        if link not in visited and child_limit < 5: 
                             visited.add(link)
                             parent_map[link] = current_url
-                            queue.append((link, current_depth + 1))
+                            
+                            new_depth = current_depth + 1
+                            
+                        
+                            if algorithm == "UCS":
+                           
+                                heapq.heappush(frontier, (new_depth, link, new_depth))
+                                
+                            elif algorithm == "GREEDY":
+                            
+                                sim_score = calculate_heuristic(link, target_url)
+                                priority = 1.0 - sim_score
+                                heapq.heappush(frontier, (priority, link, new_depth))
+                                
+                            else:
+                                frontier.append((link, new_depth))
+                            
                             child_limit += 1
 
+                      
                             await websocket.send_json({
                                 "type": "link_added",
                                 "link": {"source": current_url, "target": link}
                             })
-                            await asyncio.sleep(0.05) 
+                            await asyncio.sleep(0.02) 
 
             await asyncio.sleep(0.01)
+
+       
+        end_time = time.time()
+        elapsed_time = round(end_time - start_time, 2)
 
         if found:
             path = []
             curr = target_url
-            while curr is not None:
+           
+            while curr is not None and curr in parent_map:
                 path.append(curr)
-                curr = parent_map.get(curr)
+                curr = parent_map[curr]
             
             winning_path = path[::-1]
-            await websocket.send_json({"type": "path_found", "path": winning_path})
+            await websocket.send_json({
+                "type": "path_found", 
+                "path": winning_path,
+                "time": elapsed_time
+            })
+            await websocket.send_json({"type": "status", "msg": f"TARGET DITEMUKAN! ({elapsed_time}s)"})
         else:
-            await websocket.send_json({"type": "status", "msg": f"Gagal. Sudah {count} node tapi belum ketemu."})
+            await websocket.send_json({
+                "type": "status", 
+                "msg": f"Gagal/Limit Habis. {count} nodes, {elapsed_time}s."
+            })
 
         await websocket.close()
         
