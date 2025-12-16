@@ -3,8 +3,8 @@ import { useState, useRef, useEffect } from "react";
 import TreeVis from "./components/TreeVis";
 
 export default function Home() {
-  const [startUrl, setStartUrl] = useState("https://id.wikipedia.org/wiki/Soekarno");
-  const [targetUrl, setTargetUrl] = useState("https://id.wikipedia.org/wiki/Barack_Obama");
+  const [startUrl, setStartUrl] = useState("https://id.wikipedia.org/wiki/Institut_Teknologi_Sepuluh_Nopember");
+  const [targetUrl, setTargetUrl] = useState("https://id.wikipedia.org/wiki/Jakarta");
 
   const [algorithm, setAlgorithm] = useState("BFS");
   const [executionTime, setExecutionTime] = useState(null);
